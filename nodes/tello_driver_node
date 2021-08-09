@@ -1,9 +1,9 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 import rospy
 from std_msgs.msg import Empty, UInt8, Bool
 from std_msgs.msg import UInt8MultiArray
 from sensor_msgs.msg import Image, CompressedImage, Imu
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from nav_msgs.msg import Odometry
 from dynamic_reconfigure.server import Server
 from tello_driver.msg import TelloStatus
@@ -27,7 +27,7 @@ from tellopy._internal import logger
 from sensor_msgs.msg import CameraInfo
 
 # To load camera calibration from '.yaml' format
-import camera_info_manager as cim
+#import camera_info_manager as cim
 
 # Access to all protocol constant variables
 from tellopy._internal.protocol import *
@@ -137,7 +137,8 @@ class TelloNode(tello.Tello):
         self.sub_flattrim = rospy.Subscriber(
             'flattrim', Empty, self.cb_flattrim)
         self.sub_flip = rospy.Subscriber('flip', UInt8, self.cb_flip)
-        self.sub_cmd_vel = rospy.Subscriber('cmd_vel', Twist, self.cb_cmd_vel)
+        self.sub_cmd_vel = rospy.Subscriber('cmd_vel', TwistStamped, self.cb_cmd_vel)
+        self.sub_cmd_vel_fixed = rospy.Subscriber('cmd_vel_fixed', Empty, self.cb_cmd_vel_fixed)
         self.sub_fast_mode = rospy.Subscriber(
             'fast_mode', Empty, self.cb_fast_mode)
 
@@ -169,11 +170,11 @@ class TelloNode(tello.Tello):
             self.frame_thread = threading.Thread(target=self.framegrabber_loop)
             self.frame_thread.start()
 
-        calib_path = rospy.get_param('~camera_calibration', '') 
-        self.caminfo = cim.loadCalibrationFile(calib_path, 'camera_front')
-        self.caminfo.header.frame_id = rospy.get_param('~camera_frame', rospy.get_namespace() + 'camera_front')
+        #calib_path = rospy.get_param('~camera_calibration', '') 
+        #self.caminfo = cim.loadCalibrationFile(calib_path, 'camera_front')
+        #self.caminfo.header.frame_id = rospy.get_param('~camera_frame', rospy.get_namespace() + 'camera_front')
         self.pub_caminfo = rospy.Publisher('camera/camera_info', CameraInfo, queue_size=1, latch=True)                
-        self.pub_caminfo.publish(self.caminfo)
+        #self.pub_caminfo.publish(self.caminfo)
 
         self.sub_emergency = rospy.Subscriber('emergency', Empty, self.cb_emergency, queue_size=1)               
         
@@ -183,7 +184,27 @@ class TelloNode(tello.Tello):
 
 ###########################################BEGIN###################################
 
-## Add 'Tello' compositions, leave 'TelloPy' package untouched (Jordy) ##        
+## Add 'Tello' compositions, leave 'TelloPy' package untouched (Jordy) ##  
+    def cb_cmd_vel_fixed(self,msg):
+        self.set_pitch( self.__scale_vel_cmd(0.2))
+        self.set_roll( self.__scale_vel_cmd(0.0))
+        self.set_yaw( self.__scale_vel_cmd(0.0))
+        self.set_throttle( self.__scale_vel_cmd(0.0))
+        time.sleep(2.0)
+        self.set_pitch( self.__scale_vel_cmd(0.0))
+        self.set_roll( self.__scale_vel_cmd(0.0))
+        self.set_yaw( self.__scale_vel_cmd(0.3))
+        self.set_throttle( self.__scale_vel_cmd(0.0))
+        time.sleep(2.0)
+        self.set_pitch( self.__scale_vel_cmd(0.2))
+        self.set_roll( self.__scale_vel_cmd(0.0))
+        self.set_yaw( self.__scale_vel_cmd(0.0))
+        self.set_throttle( self.__scale_vel_cmd(0.0))
+        time.sleep(2.0)
+        self.set_pitch( self.__scale_vel_cmd(0.0))
+        self.set_roll( self.__scale_vel_cmd(0.0))
+        self.set_yaw( self.__scale_vel_cmd(0.0))
+        self.set_throttle( self.__scale_vel_cmd(0.0))
 
     def set_fast_mode(self, enabled):
         self.fast_mode = enabled
@@ -396,6 +417,41 @@ class TelloNode(tello.Tello):
         )
         self.pub_status.publish(msg)
 
+    def euler_to_quaternion(self, roll, pitch, yaw):
+
+        qx = np.sin(roll/2) * np.cos(pitch/2) * np.cos(yaw/2) - np.cos(roll/2) * np.sin(pitch/2) * np.sin(yaw/2)
+        qy = np.cos(roll/2) * np.sin(pitch/2) * np.cos(yaw/2) + np.sin(roll/2) * np.cos(pitch/2) * np.sin(yaw/2)
+        qz = np.cos(roll/2) * np.cos(pitch/2) * np.sin(yaw/2) - np.sin(roll/2) * np.sin(pitch/2) * np.cos(yaw/2)
+        qw = np.cos(roll/2) * np.cos(pitch/2) * np.cos(yaw/2) + np.sin(roll/2) * np.sin(pitch/2) * np.sin(yaw/2)
+
+        return [qx, qy, qz, qw]
+
+    def euler_from_quaternion(self,x, y, z, w):
+        """
+        Convert a quaternion into euler angles (roll, pitch, yaw)
+        roll is rotation around x in radians (counterclockwise)
+        pitch is rotation around y in radians (counterclockwise)
+        yaw is rotation around z in radians (counterclockwise)
+        """
+        t0 = +2.0 * (w * x + y * z)
+        t1 = +1.0 - 2.0 * (x * x + y * y)
+        roll_x = math.atan2(t0, t1)
+     
+        t2 = +2.0 * (w * y - z * x)
+        t2 = +1.0 if t2 > +1.0 else t2
+        t2 = -1.0 if t2 < -1.0 else t2
+        pitch_y = math.asin(t2)
+     
+        t3 = +2.0 * (w * z + x * y)
+        t4 = +1.0 - 2.0 * (y * y + z * z)
+        yaw_z = math.atan2(t3, t4)
+
+        print('roll',roll_x*180/3.14159, 'pitch',pitch_y*180/3.14159, 'yaw_z', yaw_z*180/3.14159)
+     
+        return roll_x, pitch_y, yaw_z # in radians
+
+
+
     def cb_data_log(self, event, sender, data, **args):
         time_cb = rospy.Time.now()
 
@@ -404,14 +460,18 @@ class TelloNode(tello.Tello):
         odom_msg.header.stamp = time_cb
         odom_msg.header.frame_id = rospy.get_namespace() + 'local_origin'        
 
+        roll, pitch, yaw = self.euler_from_quaternion(data.imu.q1, data.imu.q2, data.imu.q3, data.imu.q0)
+        qx, qy, qz, qw = self.euler_to_quaternion(roll, -pitch, -yaw)
+
         # Height from MVO received as negative distance to floor
         odom_msg.pose.pose.position.z = -data.mvo.pos_z #self.height #-data.mvo.pos_z
         odom_msg.pose.pose.position.x = data.mvo.pos_x
-        odom_msg.pose.pose.position.y = data.mvo.pos_y
-        odom_msg.pose.pose.orientation.w = data.imu.q0
-        odom_msg.pose.pose.orientation.x = data.imu.q1
-        odom_msg.pose.pose.orientation.y = data.imu.q2
-        odom_msg.pose.pose.orientation.z = data.imu.q3
+        odom_msg.pose.pose.position.y = -data.mvo.pos_y
+        odom_msg.pose.pose.orientation.w = qw
+        odom_msg.pose.pose.orientation.x = qx
+        odom_msg.pose.pose.orientation.y = qy
+        odom_msg.pose.pose.orientation.z = qz
+
         # Linear speeds from MVO received in dm/sec
         odom_msg.twist.twist.linear.x = data.mvo.vel_y/10
         odom_msg.twist.twist.linear.y = data.mvo.vel_x/10
@@ -440,10 +500,10 @@ class TelloNode(tello.Tello):
         self.pub_imu.publish(imu_msg)
 
     def cb_cmd_vel(self, msg):
-        self.set_pitch( self.__scale_vel_cmd(msg.linear.y) )
-        self.set_roll( self.__scale_vel_cmd(msg.linear.x) )
-        self.set_yaw( self.__scale_vel_cmd(msg.angular.z) )
-        self.set_throttle( self.__scale_vel_cmd(msg.linear.z) )
+        self.set_pitch( self.__scale_vel_cmd(msg.twist.linear.x) )
+        self.set_roll( self.__scale_vel_cmd(-msg.twist.linear.y) )
+        self.set_yaw( self.__scale_vel_cmd(-msg.twist.angular.z) )
+        self.set_throttle( self.__scale_vel_cmd(msg.twist.linear.z) )
 
     def cb_flip(self, msg):
         if msg.data < 0 or msg.data > 7: # flip integers between [0,7]
@@ -463,14 +523,14 @@ class TelloNode(tello.Tello):
         frame, seq_id, frame_secs = data
         pkt_msg = CompressedImage()
         pkt_msg.header.seq = seq_id
-        pkt_msg.header.frame_id = self.caminfo.header.frame_id
+        #pkt_msg.header.frame_id = self.caminfo.header.frame_id
         pkt_msg.header.stamp = rospy.Time.from_sec(frame_secs)
         pkt_msg.data = frame
         self.pub_image_h264.publish(pkt_msg)
 
-        self.caminfo.header.seq = seq_id
-        self.caminfo.header.stamp = rospy.Time.from_sec(frame_secs)
-        self.pub_caminfo.publish(self.caminfo)        
+        #self.caminfo.header.seq = seq_id
+        #self.caminfo.header.stamp = rospy.Time.from_sec(frame_secs)
+        #self.pub_caminfo.publish(self.caminfo)        
 
     def framegrabber_loop(self):
         import av #Import here as 'hack' to prevent troublesome install of PyAV when not used
@@ -492,12 +552,13 @@ class TelloNode(tello.Tello):
                     img = np.array(frame.to_image())
                     try:
                         img_msg = self.bridge.cv2_to_imgmsg(img, 'rgb8')
-                        img_msg.header.frame_id = self.caminfo.header.frame_id
+                        img_msg.header.stamp = rospy.Time.now()
+                        #img_msg.header.frame_id = self.caminfo.header.frame_id
                     except CvBridgeError as err:
                         rospy.logerr('fgrab: cv bridge failed - %s' % str(err))
                         continue
                     self.pub_image_raw.publish(img_msg)
-                    self.pub_caminfo.publish(self.caminfo)                    
+                    #self.pub_caminfo.publish(self.caminfo)                    
                 break
             except BaseException as err:
                 rospy.logerr('fgrab: pyav decoder failed - %s' % str(err))
